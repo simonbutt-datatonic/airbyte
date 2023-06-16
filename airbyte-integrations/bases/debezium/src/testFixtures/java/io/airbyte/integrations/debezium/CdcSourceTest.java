@@ -776,6 +776,7 @@ public abstract class CdcSourceTest {
     // stream with PK
     streams.get(0).setSourceDefinedCursor(true);
     addCdcMetadataColumns(streams.get(0));
+    addCdcDefaultCursorField(streams.get(0));
 
     final AirbyteStream streamWithoutPK = CatalogHelpers.createAirbyteStream(
         MODELS_STREAM_NAME + "_2",
@@ -785,6 +786,7 @@ public abstract class CdcSourceTest {
         Field.of(COL_MODEL, JsonSchemaType.STRING));
     streamWithoutPK.setSourceDefinedPrimaryKey(Collections.emptyList());
     streamWithoutPK.setSupportedSyncModes(List.of(SyncMode.FULL_REFRESH));
+    addCdcDefaultCursorField(streamWithoutPK);
     addCdcMetadataColumns(streamWithoutPK);
 
     final AirbyteStream randomStream = CatalogHelpers.createAirbyteStream(
@@ -796,6 +798,8 @@ public abstract class CdcSourceTest {
         .withSourceDefinedCursor(true)
         .withSupportedSyncModes(Lists.newArrayList(SyncMode.FULL_REFRESH, SyncMode.INCREMENTAL))
         .withSourceDefinedPrimaryKey(List.of(List.of(COL_ID + "_random")));
+
+    addCdcDefaultCursorField(randomStream);
     addCdcMetadataColumns(randomStream);
 
     streams.add(streamWithoutPK);
@@ -820,6 +824,8 @@ public abstract class CdcSourceTest {
   protected abstract void removeCDCColumns(final ObjectNode data);
 
   protected abstract void addCdcMetadataColumns(final AirbyteStream stream);
+
+  protected abstract void addCdcDefaultCursorField(final AirbyteStream stream);
 
   protected abstract Source getSource();
 

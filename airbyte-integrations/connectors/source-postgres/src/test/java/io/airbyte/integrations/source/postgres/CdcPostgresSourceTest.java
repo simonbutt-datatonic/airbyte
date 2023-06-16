@@ -293,6 +293,11 @@ public class CdcPostgresSourceTest extends CdcSourceTest {
   }
 
   @Override
+  protected void addCdcDefaultCursorField(final AirbyteStream stream) {
+    stream.setDefaultCursorField(ImmutableList.of(CDC_LSN));
+  }
+
+  @Override
   protected Source getSource() {
     return source;
   }
