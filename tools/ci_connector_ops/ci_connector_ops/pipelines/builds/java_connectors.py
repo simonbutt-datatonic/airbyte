@@ -15,6 +15,7 @@ class BuildConnectorDistributionTar(GradleTask):
 
     title = "Build connector tar"
     gradle_task_name = "distTar"
+    BIND_TO_DOCKER_HOST = False
 
     async def _run(self) -> StepResult:
         with_built_tar = (
