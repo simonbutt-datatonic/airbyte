@@ -6,14 +6,14 @@
 import json
 
 import pytest
-from airbyte_cdk.models import (
+from airbyte_protocol.models import (
     AirbyteControlConnectorConfigMessage,
     AirbyteControlMessage,
     AirbyteMessage,
     AirbyteRecordMessage,
     OrchestratorType,
 )
-from airbyte_cdk.models import Type as AirbyteMessageType
+from airbyte_protocol.models import Type as AirbyteMessageType
 from connector_acceptance_test.utils import connector_runner
 
 

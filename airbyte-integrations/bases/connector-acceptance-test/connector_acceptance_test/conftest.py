@@ -15,7 +15,7 @@ from subprocess import STDOUT, check_output, run
 from typing import Any, List, Mapping, MutableMapping, Optional, Set
 
 import pytest
-from airbyte_cdk.models import AirbyteRecordMessage, AirbyteStream, ConfiguredAirbyteCatalog, ConnectorSpecification, Type
+from airbyte_protocol.models import AirbyteRecordMessage, AirbyteStream, ConfiguredAirbyteCatalog, ConnectorSpecification, Type
 from connector_acceptance_test.base import BaseTest
 from connector_acceptance_test.config import Config, EmptyStreamConfiguration, ExpectedRecordsConfig, IgnoredFieldsConfiguration
 from connector_acceptance_test.tests import TestBasicRead

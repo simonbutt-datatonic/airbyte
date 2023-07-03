@@ -15,7 +15,7 @@ from xmlrpc.client import Boolean
 import dpath.util
 import jsonschema
 import pytest
-from airbyte_cdk.models import (
+from airbyte_protocol.models import (
     AirbyteRecordMessage,
     AirbyteStream,
     AirbyteTraceMessage,
@@ -46,8 +46,12 @@ from connector_acceptance_test.utils.common import (
     find_all_values_for_key_in_schema,
     find_keyword_schema,
 )
-from connector_acceptance_test.utils.json_schema_helper import JsonSchemaHelper, get_expected_schema_structure, get_object_structure
-from jsonschema._utils import flatten
+from connector_acceptance_test.utils.json_schema_helper import (
+    JsonSchemaHelper,
+    flatten_tuples,
+    get_expected_schema_structure,
+    get_object_structure,
+)
 
 
 @pytest.fixture(name="connector_spec_dict")
@@ -836,7 +840,7 @@ class TestBasicRead(BaseTest):
         In case of `oneOf` or `anyOf` schema props, compare only choice which is present in records.
         """
         expected_paths = get_expected_schema_structure(schema, annotate_one_of=True)
-        expected_paths = set(flatten(tuple(expected_paths)))
+        expected_paths = set(flatten_tuples(tuple(expected_paths)))
 
         for record in records:
             record_paths = set(get_object_structure(record))

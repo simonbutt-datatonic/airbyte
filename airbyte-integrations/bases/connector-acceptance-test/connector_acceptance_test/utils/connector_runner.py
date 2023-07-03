@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Iterable, List, Mapping, Optional
 
 import docker
-from airbyte_cdk.models import AirbyteMessage, ConfiguredAirbyteCatalog, OrchestratorType
-from airbyte_cdk.models import Type as AirbyteMessageType
+from airbyte_protocol.models import AirbyteMessage, ConfiguredAirbyteCatalog, OrchestratorType
+from airbyte_protocol.models import Type as AirbyteMessageType
 from docker.errors import ContainerError, NotFound
 from docker.models.containers import Container
 from pydantic import ValidationError
