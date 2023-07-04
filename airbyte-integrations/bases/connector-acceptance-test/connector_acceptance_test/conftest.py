@@ -146,10 +146,10 @@ def connector_spec_fixture(connector_spec_path) -> ConnectorSpecification:
 
 
 @pytest.fixture(name="docker_runner")
-def docker_runner_fixture(image_tag, tmp_path, connector_config_path, custom_environment_variables) -> ConnectorRunner:
+def docker_runner_fixture(image_tag, base_path, connector_config_path, custom_environment_variables) -> ConnectorRunner:
     return ConnectorRunner(
         image_tag,
-        volume=tmp_path,
+        base_path,
         connector_configuration_path=connector_config_path,
         custom_environment_variables=custom_environment_variables,
     )
@@ -162,12 +162,12 @@ def previous_connector_image_name_fixture(image_tag, inputs) -> str:
 
 
 @pytest.fixture(name="previous_connector_docker_runner")
-def previous_connector_docker_runner_fixture(previous_connector_image_name, tmp_path) -> ConnectorRunner:
+def previous_connector_docker_runner_fixture(previous_connector_image_name, base_path) -> ConnectorRunner:
     """Fixture to create a connector runner with the previous connector docker image.
     Returns None if the latest image was not found, to skip downstream tests if the current connector is not yet published to the docker registry.
     Raise not found error if the previous connector image is not latest and expected to be published.
     """
-    return ConnectorRunner(previous_connector_image_name, volume=tmp_path / "previous_connector")
+    return ConnectorRunner(previous_connector_image_name, base_path)
 
 
 @pytest.fixture(name="empty_streams")

@@ -26,12 +26,13 @@ MAIN_REQUIREMENTS = [
     "pendulum",
     "pytest-cov~=3.0.0",
     "hypothesis",
-    "hypothesis-jsonschema",  # TODO alafanechere upgrade to latest when jsonschema lib is upgraded to >= 4.0.0 in airbyte-cdk and connector acceptance tests
+    "hypothesis-jsonschema",
     # Pinning requests and urllib3 to avoid an issue with dockerpy and requests 2.
     # Related issue: https://github.com/docker/docker-py/issues/3113
     "urllib3<2.0",
     "requests<2.29.0",
     "anyio",
+    "pytest-custom_exit_code",
 ]
 
 setuptools.setup(

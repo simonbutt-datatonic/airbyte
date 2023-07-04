@@ -5,14 +5,15 @@
 
 import json
 import logging
-import sys
+import os
 from pathlib import Path
-from typing import Iterable, List, Mapping, Optional
+from typing import List, Mapping, Optional
 
 import anyio
 import dagger
-from airbyte_protocol.models import AirbyteMessage, OrchestratorType
+from airbyte_protocol.models import AirbyteMessage, ConfiguredAirbyteCatalog, OrchestratorType
 from airbyte_protocol.models import Type as AirbyteMessageType
+from connector_acceptance_test.utils import SecretDict
 from pydantic import ValidationError
 
 
@@ -20,76 +21,74 @@ class ConnectorRunner:
     def __init__(
         self,
         image_name: str,
-        volume: Path,
+        base_path: Path,
         connector_configuration_path: Optional[Path] = None,
         custom_environment_variables: Optional[Mapping] = {},
     ):
+        self.base_path = base_path
         self.image_name = image_name
         self._runs = 0
-        self._volume_base = volume
         self._connector_configuration_path = connector_configuration_path
         self._custom_environment_variables = custom_environment_variables
+        self.dagger_connection = dagger.Connection(dagger.Config())
 
-    @property
-    def output_folder(self) -> Path:
-        return self._volume_base / f"run_{self._runs}" / "output"
+    def call_spec(self, raise_container_error=False) -> List[AirbyteMessage]:
+        return self._run(["spec"], raise_container_error)
 
-    @property
-    def input_folder(self) -> Path:
-        return self._volume_base / f"run_{self._runs}" / "input"
+    def call_check(self, config: SecretDict, raise_container_error: bool = False) -> List[AirbyteMessage]:
+        return self._run(["check", "--config", "/data/tap_config.json"], raise_container_error, config=config)
 
-    def call_spec(self, **kwargs) -> List[AirbyteMessage]:
-        cmd = "spec"
-        output = list(self.run(cmd=cmd, **kwargs))
-        return output
+    def call_discover(self, config: SecretDict, raise_container_error: bool = False) -> List[AirbyteMessage]:
+        return self._run(["discover", "--config", "/data/tap_config.json"], raise_container_error, config=config)
 
-    def call_check(self, config, **kwargs) -> List[AirbyteMessage]:
-        cmd = "check --config /data/tap_config.json"
-        output = list(self.run(cmd=cmd, config=config, **kwargs))
-        return output
+    def call_read(self, config: SecretDict, catalog: ConfiguredAirbyteCatalog, raise_container_error: bool = False) -> List[AirbyteMessage]:
+        return self._run(
+            ["read", "--config", "/data/tap_config.json", "--catalog", "/data/catalog.json"],
+            raise_container_error,
+            config=config,
+            catalog=catalog,
+        )
 
-    def call_discover(self, config, **kwargs) -> List[AirbyteMessage]:
-        cmd = "discover --config /data/tap_config.json"
-        output = list(self.run(cmd=cmd, config=config, **kwargs))
-        return output
+    def call_read_with_state(
+        self, config: SecretDict, catalog: ConfiguredAirbyteCatalog, state: dict, raise_container_error: bool = False
+    ) -> List[AirbyteMessage]:
+        return self._run(
+            ["read", "--config", "/data/tap_config.json", "--catalog", "/data/catalog.json", "--state", "/data/state.json"],
+            raise_container_error,
+            config=config,
+            catalog=catalog,
+            state=state,
+        )
 
-    def call_read(self, config, catalog, **kwargs) -> List[AirbyteMessage]:
-        cmd = "read --config /data/tap_config.json --catalog /data/catalog.json"
-        output = list(self.run(cmd=cmd, config=config, catalog=catalog, **kwargs))
-        return output
-
-    def call_read_with_state(self, config, catalog, state, **kwargs) -> List[AirbyteMessage]:
-        cmd = "read --config /data/tap_config.json --catalog /data/catalog.json --state /data/state.json"
-        output = list(self.run(cmd=cmd, config=config, catalog=catalog, state=state, **kwargs))
-        return output
-
-    def get_dagger_container(self, dagger_client):
-        if Path("/test_input/connector_image.tar").exists():
-            image_tar_file = dagger_client.host().directory("/test_input", include="connector_image.tar").file("connector_image.tar")
-            return dagger_client.container().import_(image_tar_file)
+    def get_connector_container(self, dagger_client) -> dagger.Container:
+        if container_id := os.environ.get("CONTAINER_ID"):
+            return dagger_client.container(dagger.ContainerID(container_id))
+        elif self.image_name.endswith(":dev"):
+            return dagger_client.host().directory(str(self.base_path)).docker_build()
         else:
             return dagger_client.container().from_(self.image_name)
 
-    async def run_in_dagger(self, cmd: str, options: dict, raise_container_errors: bool = True):
+    def _run(self, airbyte_command: List[str], raise_container_error: bool, config=None, catalog=None, state=None) -> List[AirbyteMessage]:
+        async def run_in_dagger(config, catalog, state):
+            async with self.dagger_connection as dagger_client:
+                container = self.get_connector_container(dagger_client)
+                if config:
+                    container = container.with_new_file("/data/tap_config.json", json.dumps(dict(config)))
+                if state:
+                    container = container.with_new_file("/data/state.json", json.dumps(state))
+                if catalog:
+                    container = container.with_new_file("/data/catalog.json", catalog.json())
+                for key, value in self._custom_environment_variables.items():
+                    container = container.with_env_variable(key, value)
+                try:
+                    return await container.with_exec(airbyte_command).stdout()
+                except Exception as e:
+                    if raise_container_error:
+                        raise e
+                    else:
+                        return e.stdout
 
-        async with dagger.Connection(dagger.Config(log_output=sys.stderr)) as dagger_client:
-            container = self.get_dagger_container(dagger_client)
-            if config := options.get("config"):
-                container = container.with_new_file("/data/tap_config.json", json.dumps(dict(config)))
-            if state := options.get("state"):
-                container = container.with_new_file("/data/state.json", json.dumps(state))
-            if catalog := options.get("catalog"):
-                container = container.with_new_file("/data/catalog.json", catalog.json())
-            for key, value in self._custom_environment_variables.items():
-                container = container.with_env_variable(key, value)
-            try:
-                output = await container.with_exec(cmd.split(" ")).stdout()
-            except Exception as e:
-                if raise_container_errors:
-                    raise e
-                else:
-                    output = e.stdout
-
+        output = anyio.run(run_in_dagger, config, catalog, state)
         airbyte_messages = []
         for line in output.splitlines():
             try:
@@ -101,31 +100,27 @@ class ConnectorRunner:
                 logging.warning("Unable to parse connector's output %s, error: %s", line, exc)
         return airbyte_messages
 
-    def run(self, cmd, config=None, state=None, catalog=None, raise_container_error: bool = True, **kwargs) -> Iterable[AirbyteMessage]:
-        self._runs += 1
-        yield from anyio.run(self.run_in_dagger, cmd, {"config": config, "state": state, "catalog": catalog}, raise_container_error)
-
     def get_container_env_variable(self, name: str):
-        return anyio.run(self.async_get_container_variable, name)
+        async def async_get_container_variable():
+            async with self.dagger_connection as dagger_client:
+                return await self.get_connector_container(dagger_client).env_variable(name)
 
-    async def async_get_container_variable(self, name: str):
-        async with dagger.Connection(dagger.Config(log_output=sys.stderr)) as dagger_client:
-            return await self.get_dagger_container(dagger_client).env_variable(name)
+        return anyio.run(async_get_container_variable)
 
     def get_container_label(self, label: str):
-        return anyio.run(self.async_get_container_label, label)
+        async def async_get_container_label():
+            async with self.dagger_connection as dagger_client:
+                return await self.get_connector_container(dagger_client).label(label)
 
-    async def async_get_container_label(self, label: str):
-        async with dagger.Connection(dagger.Config(log_output=sys.stderr)) as dagger_client:
-            return await self.get_dagger_container(dagger_client).label(label)
+        return anyio.run(async_get_container_label)
 
     def get_container_entrypoint(self):
-        entrypoint = anyio.run(self.async_get_container_entrypoint)
-        return " ".join(entrypoint)
+        async def async_get_container_entrypoint():
+            async with self.dagger_connection as dagger_client:
+                return await self.get_connector_container(dagger_client).entrypoint()
 
-    async def async_get_container_entrypoint(self):
-        async with dagger.Connection(dagger.Config(log_output=sys.stderr)) as dagger_client:
-            return await self.get_dagger_container(dagger_client).entrypoint()
+        entrypoint = anyio.run(async_get_container_entrypoint)
+        return " ".join(entrypoint)
 
     def _persist_new_configuration(self, new_configuration: dict, configuration_emitted_at: int) -> Optional[Path]:
         """Store new configuration values to an updated_configurations subdir under the original configuration path.
