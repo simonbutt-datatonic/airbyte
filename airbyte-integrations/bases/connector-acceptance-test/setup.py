@@ -7,7 +7,7 @@ import setuptools
 
 MAIN_REQUIREMENTS = [
     "airbyte-protocol-models",
-    "dagger-io==0.6.12",
+    "dagger-io==0.6.2",
     "PyYAML~=5.4",
     "icdiff~=1.9",
     "inflection~=0.5",
@@ -31,7 +31,7 @@ MAIN_REQUIREMENTS = [
     # Related issue: https://github.com/docker/docker-py/issues/3113
     "urllib3<2.0",
     "requests<2.29.0",
-    "flatten-json",
+    "anyio",
 ]
 
 setuptools.setup(

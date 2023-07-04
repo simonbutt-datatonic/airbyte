@@ -14,6 +14,7 @@ from pathlib import Path
 from subprocess import STDOUT, check_output, run
 from typing import Any, List, Mapping, MutableMapping, Optional, Set
 
+import dagger
 import pytest
 from airbyte_protocol.models import AirbyteRecordMessage, AirbyteStream, ConfiguredAirbyteCatalog, ConnectorSpecification, Type
 from connector_acceptance_test.base import BaseTest
@@ -29,7 +30,6 @@ from connector_acceptance_test.utils import (
     load_yaml_or_json_path,
     make_hashable,
 )
-from docker import errors
 
 
 @pytest.fixture(name="acceptance_test_config", scope="session")
@@ -167,27 +167,7 @@ def previous_connector_docker_runner_fixture(previous_connector_image_name, tmp_
     Returns None if the latest image was not found, to skip downstream tests if the current connector is not yet published to the docker registry.
     Raise not found error if the previous connector image is not latest and expected to be published.
     """
-    try:
-        return ConnectorRunner(previous_connector_image_name, volume=tmp_path / "previous_connector")
-    except (errors.NotFound, errors.ImageNotFound) as e:
-        if previous_connector_image_name.endswith("latest"):
-            logging.warning(
-                f"\n We did not find the {previous_connector_image_name} image for this connector. This probably means this version has not yet been published to an accessible docker registry like DockerHub."
-            )
-            return None
-        else:
-            raise e
-
-
-@pytest.fixture(scope="session", autouse=True)
-def pull_docker_image(acceptance_test_config) -> None:
-    """Startup fixture to pull docker image"""
-    image_name = acceptance_test_config.connector_image
-    config_filename = "acceptance-test-config.yml"
-    try:
-        ConnectorRunner(image_name=image_name, volume=Path("."))
-    except errors.ImageNotFound:
-        pytest.exit(f"Docker image `{image_name}` not found, please check your {config_filename} file", returncode=1)
+    return ConnectorRunner(previous_connector_image_name, volume=tmp_path / "previous_connector")
 
 
 @pytest.fixture(name="empty_streams")
@@ -314,7 +294,7 @@ def previous_discovered_catalog_fixture(
     if not previous_cached_schemas:
         try:
             output = previous_connector_docker_runner.call_discover(config=connector_config)
-        except errors.ContainerError:
+        except dagger.DaggerError:
             logging.warning(
                 "\n DISCOVER on the previous connector version failed. This could be because the current connector config is not compatible with the previous connector version."
             )
