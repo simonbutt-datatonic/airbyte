@@ -14,7 +14,6 @@ from ci_connector_ops.pipelines.builds.python_connectors import BuildConnectorIm
 from ci_connector_ops.pipelines.contexts import ConnectorContext
 from ci_connector_ops.pipelines.helpers.steps import run_steps
 from ci_connector_ops.pipelines.tests.common import AcceptanceTests, PytestStep
-from ci_connector_ops.pipelines.utils import export_container_to_tarball
 from dagger import Container
 
 
@@ -127,7 +126,6 @@ async def run_all_tests(context: ConnectorContext) -> List[StepResult]:
     if any([step_result.status is StepStatus.FAILURE for step_result in step_results]):
         return step_results
     connector_package_install_results, build_connector_image_results = step_results[0], step_results[1]
-    connector_image_tar_file, _ = await export_container_to_tarball(context, build_connector_image_results.output_artifact)
     connector_container = connector_package_install_results.output_artifact
 
     context.connector_secrets = await secrets.get_connector_secrets(context)
@@ -140,7 +138,7 @@ async def run_all_tests(context: ConnectorContext) -> List[StepResult]:
     async with asyncer.create_task_group() as task_group:
         tasks = [
             task_group.soonify(IntegrationTests(context).run)(connector_container),
-            task_group.soonify(AcceptanceTests(context).run)(connector_image_tar_file),
+            task_group.soonify(AcceptanceTests(context).run)(build_connector_image_results.output_artifact),
         ]
 
     return step_results + [task.value for task in tasks]

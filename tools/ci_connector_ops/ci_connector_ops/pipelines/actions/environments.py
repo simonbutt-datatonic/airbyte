@@ -14,7 +14,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional
 
-import yaml
 from ci_connector_ops.pipelines import consts
 from ci_connector_ops.pipelines.consts import (
     CI_CONNECTOR_OPS_SOURCE_PATH,
@@ -126,6 +125,7 @@ async def find_local_python_dependencies(
     package_source_code_path: str,
     search_dependencies_in_setup_py: bool = True,
     search_dependencies_in_requirements_txt: bool = True,
+    include_cat_deps: bool = False,
 ) -> List[str]:
     """Find local python dependencies of a python package. The dependencies are found in the setup.py and requirements.txt files.
 
@@ -427,7 +427,7 @@ def with_docker_cli(context: ConnectorContext) -> Container:
     return with_bound_docker_host(context, docker_cli)
 
 
-async def with_connector_acceptance_test(context: ConnectorContext, connector_under_test_image_tar: File) -> Container:
+async def with_connector_acceptance_test(context: ConnectorContext, connector_under_test: Container) -> Container:
     """Create a container to run connector acceptance tests, bound to a persistent docker host.
 
     Args:
@@ -436,34 +436,32 @@ async def with_connector_acceptance_test(context: ConnectorContext, connector_un
     Returns:
         Container: A container with connector acceptance tests installed.
     """
-
-    patched_cat_config = context.connector.acceptance_test_config
-    patched_cat_config["connector_image"] = context.connector.acceptance_test_config["connector_image"].replace(
-        ":dev", f":{context.git_revision}"
-    )
-    image_sha = await load_image_to_docker_host(context, connector_under_test_image_tar, patched_cat_config["connector_image"])
-
-    if context.connector_acceptance_test_image.endswith(":dev"):
-        cat_container = context.connector_acceptance_test_source_dir.docker_build()
-    else:
-        cat_container = context.dagger_client.container().from_(context.connector_acceptance_test_image)
-
-    test_input = context.get_connector_dir().with_new_file("acceptance-test-config.yml", yaml.safe_dump(patched_cat_config))
+    connector_under_test_id = await connector_under_test.id()
+    context.get_repo_dir("airbyte-integrations/bases/connector-acceptance-test")
     cat_container = (
-        with_bound_docker_host(context, cat_container)
-        .with_entrypoint([])
-        .with_exec(["pip", "install", "pytest-custom_exit_code"])
-        .with_mounted_directory("/test_input", test_input)
+        context.dagger_client.container()
+        .from_("python:3.10.12")
+        # TODO set TZ correctly
+        .with_exec(["sh", "-c", 'echo "Europe/Paris" > /etc/timezone'])
+        .with_exec(["apt-get", "install", "curl", "bash"])
+        .with_env_variable("VERSION", consts.DOCKER_VERSION)
+        .with_exec(["sh", "-c", "curl -fsSL https://get.docker.com | sh"])
+        .with_mounted_directory("/cat", context.get_repo_dir("airbyte-integrations/bases/connector-acceptance-test"))
+        .with_workdir("/cat")
+        .with_env_variable("ACCEPTANCE_TEST_DOCKER_CONTAINER", "1")
+        .with_exec(["pip", "install", "."])
+        .with_workdir("/test_input")
+        .with_mounted_directory("/test_input", context.get_connector_dir())
+        .with_env_variable("CONTAINER_ID", connector_under_test_id)
     )
     cat_container = (
         with_mounted_connector_secrets(context, cat_container, "/test_input/secrets")
-        .with_env_variable("CONNECTOR_IMAGE_ID", image_sha)
         # This bursts the CAT cached results everyday.
         # It's cool because in case of a partially failing nightly build the connectors that already ran CAT won't re-run CAT.
         # We keep the guarantee that a CAT runs everyday.
         .with_env_variable("CACHEBUSTER", datetime.utcnow().strftime("%Y%m%d"))
-        .with_workdir("/test_input")
         .with_entrypoint(["python", "-m", "pytest", "-p", "connector_acceptance_test.plugin", "--suppress-tests-failed-exit-code"])
+        .with_unix_socket("/var/run/docker.sock", context.dagger_client.host().unix_socket("/var/run/docker.sock"))
         .with_exec(["--acceptance-test-config", "/test_input"])
     )
     return cat_container
