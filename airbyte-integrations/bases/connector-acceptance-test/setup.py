@@ -7,7 +7,7 @@ import setuptools
 
 MAIN_REQUIREMENTS = [
     "airbyte-protocol-models",
-    "dagger-io==0.6.0",
+    "dagger-io==0.6.3",
     "PyYAML~=5.4",
     "icdiff~=1.9",
     "inflection~=0.5",
