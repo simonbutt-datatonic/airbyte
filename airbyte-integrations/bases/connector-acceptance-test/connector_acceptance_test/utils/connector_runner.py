@@ -62,11 +62,14 @@ class ConnectorRunner:
 
     def get_connector_container(self, dagger_client) -> dagger.Container:
         if container_id := os.environ.get("CONTAINER_ID"):
-            return dagger_client.container(dagger.ContainerID(container_id))
+            container = dagger_client.container(dagger.ContainerID(container_id))
         elif self.image_name.endswith(":dev"):
-            return dagger_client.host().directory(str(self.base_path)).docker_build()
+            container = dagger_client.host().directory(str(self.base_path)).docker_build()
         else:
-            return dagger_client.container().from_(self.image_name)
+            container = dagger_client.container().from_(self.image_name)
+        if os.environ.get("CACHEBUSTER"):
+            container = container.with_env_variable("CACHEBUSTER", os.environ["CACHEBUSTER"])
+        return container
 
     def _run(self, airbyte_command: List[str], raise_container_error: bool, config=None, catalog=None, state=None) -> List[AirbyteMessage]:
         async def run_in_dagger(config, catalog, state):
@@ -81,12 +84,15 @@ class ConnectorRunner:
                 for key, value in self._custom_environment_variables.items():
                     container = container.with_env_variable(key, value)
                 try:
-                    return await container.with_exec(airbyte_command).stdout()
+                    container = container.with_exec(airbyte_command)
+                    return await container.stdout()
                 except Exception as e:
                     if raise_container_error:
                         raise e
                     else:
-                        return e.stdout
+                        if isinstance(e, dagger.QueryError):
+                            return e.stdout
+                        return str(e)
 
         output = anyio.run(run_in_dagger, config, catalog, state)
         airbyte_messages = []
