@@ -446,9 +446,9 @@ async def with_connector_acceptance_test(context: ConnectorContext, connector_un
     return (
         context.dagger_client.container()
         .from_("python:3.10.12")
-        # TODO set TZ correctly
-        .with_exec(["sh", "-c", 'echo "Europe/Paris" > /etc/timezone'])
-        .with_exec(["apt-get", "install", "curl", "bash"])
+        .with_exec(["apt-get", "install", "curl", "bash", "tzdata"])
+        .with_exec(["sh", "-c", 'echo "Etc/UTC" > /etc/timezone'])
+        .with_exec(["dpkg-reconfigure", "-f", "noninteractive", "tzdata"])
         .with_env_variable("VERSION", consts.DOCKER_VERSION)
         .with_exec(["sh", "-c", "curl -fsSL https://get.docker.com | sh"])
         .with_mounted_directory("/cat", context.get_repo_dir("airbyte-integrations/bases/connector-acceptance-test"))
