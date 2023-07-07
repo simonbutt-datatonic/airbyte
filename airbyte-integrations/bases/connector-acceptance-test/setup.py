@@ -27,10 +27,8 @@ MAIN_REQUIREMENTS = [
     "pytest-cov~=3.0.0",
     "hypothesis",
     "hypothesis-jsonschema",
-    # Pinning requests and urllib3 to avoid an issue with dockerpy and requests 2.
-    # Related issue: https://github.com/docker/docker-py/issues/3113
-    "urllib3<2.0",
-    "requests<2.29.0",
+    "urllib3",
+    "requests",
     "anyio",
     "pytest-custom_exit_code",
 ]
