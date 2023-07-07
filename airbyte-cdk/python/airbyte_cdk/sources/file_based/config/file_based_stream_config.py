@@ -7,6 +7,8 @@ from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional, Union
 
 from airbyte_cdk.models import ConfiguredAirbyteCatalog
+from airbyte_cdk.sources.file_based.exceptions import ConfigValidationError, FileBasedSourceError
+from airbyte_cdk.sources.file_based.schema_helpers import type_mapping_to_jsonschema
 from pydantic import BaseModel, root_validator, validator
 
 PrimaryKeyType = Optional[Union[str, List[str], List[List[str]]]]
@@ -68,7 +70,7 @@ class FileBasedStreamConfig(BaseModel):
     validation_policy: Union[str, Any]
     validation_policies: Dict[str, Any]
     catalog_schema: Optional[ConfiguredAirbyteCatalog]
-    input_schema: Optional[Dict[str, Any]]
+    input_schema: Optional[Union[str, Mapping[str, Any]]]
     primary_key: PrimaryKeyType
     max_history_size: Optional[int]
     days_to_sync_if_history_is_full: Optional[int]
@@ -92,5 +94,21 @@ class FileBasedStreamConfig(BaseModel):
             raise ValueError(f"validation_policy must be one of {list(validation_policies.keys())}")
 
         values["validation_policy"] = validation_policies[validation_policy_key]
+
+        return values
+
+    @root_validator
+    def set_input_schema(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        input_schema = values.get("input_schema")
+
+        if input_schema:
+            try:
+                values["input_schema"] = type_mapping_to_jsonschema(input_schema)
+            except Exception as exc:
+                raise ConfigValidationError(
+                    FileBasedSourceError.ERROR_PARSING_USER_PROVIDED_SCHEMA,
+                    stream=values.get("name"),
+                    input_schema=values.get("input_schema"),
+                ) from exc
 
         return values

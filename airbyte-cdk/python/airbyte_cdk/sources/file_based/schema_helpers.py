@@ -2,14 +2,13 @@
 # Copyright (c) 2023 Airbyte, Inc., all rights reserved.
 #
 
+import json
 from copy import deepcopy
 from enum import Enum
 from functools import total_ordering
-from typing import Any, Dict, List, Literal, Mapping, Union
+from typing import Any, Dict, List, Literal, Mapping, Optional, Union
 
-from airbyte_cdk.sources.file_based.exceptions import FileBasedSourceError, SchemaInferenceError
-
-type_widths = {str: 0}
+from airbyte_cdk.sources.file_based.exceptions import ConfigValidationError, FileBasedSourceError, SchemaInferenceError
 
 JsonSchemaSupportedType = Union[List, Literal["string"], str]
 SchemaType = Dict[str, Dict[str, JsonSchemaSupportedType]]
@@ -29,6 +28,29 @@ class ComparableType(Enum):
             return self.value < other.value
         else:
             return NotImplemented
+
+
+TYPE_MAPPING = {
+    "null": "null",
+    "array": "array",
+    "boolean": "boolean",
+    "float": "number",
+    "integer": "integer",
+    "number": "number",
+    "object": "object",
+    "string": "string",
+}
+
+
+JSON_TO_PYTHON_TYPE_MAPPING = {
+    "null": None,
+    "array": list,
+    "boolean": bool,
+    "integer": int,
+    "number": float,
+    "object": dict,
+    "string": str,
+}
 
 
 def get_comparable_type(value: Any) -> ComparableType:
@@ -170,8 +192,62 @@ def conforms_to_schema(record: Mapping[str, Any], schema: Mapping[str, str]) -> 
     return True
 
 
-def type_mapping_to_jsonschema(type_mapping: Mapping[str, Any]) -> Mapping[str, str]:
+def _parse_json_input(input_schema: Optional[Union[str, Dict[str, str]]]) -> Optional[Mapping[str, str]]:
+    try:
+        schema = json.loads(input_schema)
+        if not all(isinstance(s, str) for s in schema.values()):
+            raise ConfigValidationError(
+                FileBasedSourceError.ERROR_PARSING_USER_PROVIDED_SCHEMA, details="Invalid input schema; nested schemas are not supported."
+            )
+
+    except json.decoder.JSONDecodeError:
+        return None
+
+    return schema
+
+
+def parse_comma_separated_input(input_schema):
+    mapping = {}
+    for item in input_schema.split(","):
+        parts = item.split(":")
+        if len(parts) > 2:
+            raise ConfigValidationError(
+                FileBasedSourceError.ERROR_PARSING_USER_PROVIDED_SCHEMA, details="Invalid input schema; nested schemas are not supported."
+            )
+        col_name, type_name = parts
+        mapping[col_name.strip()] = type_name.strip()
+    return mapping
+
+
+def type_mapping_to_jsonschema(input_schema: Optional[Union[str, Mapping[str, str]]]) -> Optional[Mapping[str, str]]:
     """
     Return the user input schema (type mapping), transformed to JSON Schema format.
+
+    Verify that the input schema:
+        - is a key:value map
+        - all values in the map correspond to a JsonSchema datatype
     """
-    ...
+    if not input_schema:
+        return None
+
+    result_schema = {}
+
+    json_mapping = _parse_json_input(input_schema) or parse_comma_separated_input(input_schema)
+
+    for col_name, type_name in json_mapping.items():
+        if not (col_name and type_name):
+            raise ConfigValidationError(
+                FileBasedSourceError.ERROR_PARSING_USER_PROVIDED_SCHEMA,
+                details=f"Invalid input schema; expected mapping in the format column_name: type, got {input_schema}.",
+            )
+
+        json_schema_type = TYPE_MAPPING.get(type_name.casefold())
+
+        if not json_schema_type:
+            raise ConfigValidationError(
+                FileBasedSourceError.ERROR_PARSING_USER_PROVIDED_SCHEMA, details=f"Invalid type '{type_name}' for property '{col_name}'."
+            )
+
+        result_schema[col_name] = {"type": json_schema_type}
+
+    return {"type": "object", "properties": result_schema}

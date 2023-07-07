@@ -10,6 +10,7 @@ from airbyte_cdk.sources import Source
 from airbyte_cdk.sources.file_based.exceptions import CheckAvailabilityError, FileBasedSourceError
 from airbyte_cdk.sources.file_based.file_based_stream_reader import AbstractFileBasedStreamReader
 from airbyte_cdk.sources.file_based.remote_file import RemoteFile
+from airbyte_cdk.sources.file_based.schema_helpers import conforms_to_schema
 from airbyte_cdk.sources.file_based.stream import AbstractFileBasedStream
 from airbyte_cdk.sources.streams.availability_strategy import AvailabilityStrategy
 
@@ -72,11 +73,16 @@ class DefaultFileBasedAvailabilityStrategy(AvailabilityStrategy):
         except Exception as exc:
             raise CheckAvailabilityError(FileBasedSourceError.ERROR_READING_FILE, stream=stream.name, file=file.uri) from exc
 
-        if stream.config.input_schema:
-            if not stream.record_passes_validation_policy(record):
+        if stream.config.input_schema and not _is_read_request(stream):
+            # On read requests, we don't bother checking that a record conforms to the schema
+            # because it will be checked when we're reading the record
+            if not conforms_to_schema(record, stream.config.input_schema):
                 raise CheckAvailabilityError(
                     FileBasedSourceError.ERROR_VALIDATING_RECORD,
                     stream=stream.name,
                     file=file.uri,
-                    validation_policy=stream.config.validation_policy,
                 )
+
+
+def _is_read_request(stream: AbstractFileBasedStream) -> bool:
+    return bool(stream.catalog_schema)

@@ -51,6 +51,16 @@ from unit_tests.sources.file_based.scenarios.incremental_scenarios import (
     single_csv_input_state_is_later_scenario,
     single_csv_no_input_state_scenario,
 )
+from unit_tests.sources.file_based.scenarios.user_input_schema_scenarios import (
+    multi_stream_user_input_schema_scenario_emit_nonconforming_records,
+    multi_stream_user_input_schema_scenario_schema_is_invalid,
+    multi_stream_user_input_schema_scenario_skip_nonconforming_records,
+    single_stream_user_input_schema_scenario_emit_nonconforming_records,
+    single_stream_user_input_schema_scenario_schema_is_invalid,
+    single_stream_user_input_schema_scenario_skip_nonconforming_records,
+    valid_multi_stream_user_input_schema_scenario,
+    valid_single_stream_user_input_schema_scenario,
+)
 from unit_tests.sources.file_based.scenarios.validation_policy_scenarios import (
     emit_record_scenario_multi_stream,
     emit_record_scenario_single_stream,
@@ -87,18 +97,33 @@ discover_scenarios = [
     csv_custom_format_scenario,
     multi_stream_custom_format,
     empty_schema_inference_scenario,
+    single_stream_user_input_schema_scenario_schema_is_invalid,
+    single_stream_user_input_schema_scenario_emit_nonconforming_records,
+    single_stream_user_input_schema_scenario_skip_nonconforming_records,
+    multi_stream_user_input_schema_scenario_emit_nonconforming_records,
+    multi_stream_user_input_schema_scenario_skip_nonconforming_records,
+    multi_stream_user_input_schema_scenario_schema_is_invalid,
+    valid_multi_stream_user_input_schema_scenario,
+    valid_single_stream_user_input_schema_scenario,
 ]
 
 
 @pytest.mark.parametrize("scenario", discover_scenarios, ids=[s.name for s in discover_scenarios])
 def test_discover(capsys, tmp_path, json_spec, scenario):
     expected_exc, expected_msg = scenario.expected_discover_error
+    expected_logs = scenario.expected_logs
     if expected_exc:
         with pytest.raises(expected_exc) as exc:
             discover(capsys, tmp_path, scenario)
         assert expected_msg in get_error_message_from_exc(exc)
     else:
-        assert discover(capsys, tmp_path, scenario) == scenario.expected_catalog
+        output = discover(capsys, tmp_path, scenario)
+        catalog, logs = output["catalog"], output["logs"]
+        assert catalog == scenario.expected_catalog
+        if expected_logs:
+            expected_logs = expected_logs.get("discover", [])
+            logs = [log for log in logs if log.get("log", {}).get("level") in ("ERROR", "WARN")]
+            _verify_expected_logs(logs, expected_logs)
 
 
 read_scenarios = discover_scenarios + [
@@ -115,56 +140,58 @@ read_scenarios = discover_scenarios + [
 
 @pytest.mark.parametrize("scenario", read_scenarios, ids=[s.name for s in read_scenarios])
 @freeze_time("2023-06-09T00:00:00Z")
-def test_read(capsys, tmp_path, json_spec, scenario):
+def test_read(capsys, caplog, tmp_path, json_spec, scenario):
     if scenario.incremental_scenario_config:
-        run_test_read_incremental(capsys, tmp_path, scenario)
+        run_test_read_incremental(capsys, caplog, tmp_path, scenario)
     else:
-        run_test_read_full_refresh(capsys, tmp_path, scenario)
+        run_test_read_full_refresh(capsys, caplog, tmp_path, scenario)
 
 
-def run_test_read_full_refresh(capsys, tmp_path, scenario):
+def run_test_read_full_refresh(capsys, caplog, tmp_path, scenario):
     expected_exc, expected_msg = scenario.expected_read_error
-    expected_records = scenario.expected_records
-    expected_logs = scenario.expected_logs
     if expected_exc:
         with pytest.raises(expected_exc) as exc:
-            read(capsys, tmp_path, scenario)
+            read(capsys, caplog, tmp_path, scenario)
         assert expected_msg in get_error_message_from_exc(exc)
     else:
-        output = read(capsys, tmp_path, scenario)
-        records, logs = output["records"], output["logs"]
-        assert len(records) == len(expected_records)
-        assert len(logs) == len(expected_logs)
-        assert_expected_records_match_output(records, expected_records)
-        assert_expected_logs_match_output(logs, expected_logs)
+        output = read(capsys, caplog, tmp_path, scenario)
+        _verify_read_output(output, scenario)
 
 
-def assert_expected_records_match_output(output: List[Dict[str, Any]], expected_output: List[Dict[str, Any]]):
-    for actual, expected in zip(output, expected_output):
-        assert actual["record"]["data"] == expected["data"]
-        assert actual["record"]["stream"] == expected["stream"]
-
-
-def assert_expected_logs_match_output(logs: List[Dict[str, Any]], expected_logs: List[Dict[str, Any]]):
-    for actual, expected in zip(logs, expected_logs):
-        assert actual["log"]["level"] == expected["level"]
-        assert actual["log"]["message"] == expected["message"]
-
-
-def run_test_read_incremental(capsys, tmp_path, scenario):
+def run_test_read_incremental(capsys, caplog, tmp_path, scenario):
     expected_exc, expected_msg = scenario.expected_read_error
     if expected_exc:
         with pytest.raises(expected_exc):
-            read_with_state(capsys, tmp_path, scenario)
+            read_with_state(capsys, caplog, tmp_path, scenario)
     else:
-        output = read_with_state(capsys, tmp_path, scenario)
-        expected_output = scenario.expected_records
-        assert len(output) == len(expected_output)
-        for actual, expected in zip(output, expected_output):
-            if "record" in actual:
-                assert actual["record"]["data"] == expected
-            elif "state" in actual:
-                assert actual["state"]["data"] == expected
+        output = read_with_state(capsys, caplog, tmp_path, scenario)
+        _verify_read_output(output, scenario)
+
+
+def _verify_read_output(output, scenario):
+    records, logs = output["records"], output["logs"]
+    logs = [log for log in logs if log.get("level") in ("ERROR", "WARN", "WARNING")]
+    expected_records = scenario.expected_records
+    assert len(records) == len(expected_records)
+    for actual, expected in zip(records, expected_records):
+        if "record" in actual:
+            assert actual["record"]["data"] == expected["data"]
+            assert actual["record"]["stream"] == expected["stream"]
+        elif "state" in actual:
+            assert actual["state"]["data"] == expected
+
+    if scenario.expected_logs:
+        expected_logs = scenario.expected_logs.get("read", [])
+        assert len(logs) == len(expected_logs)
+        _verify_expected_logs(logs, expected_logs)
+
+
+def _verify_expected_logs(logs: List[Dict[str, Any]], expected_logs: List[Dict[str, Any]]):
+    for actual, expected in zip(logs, expected_logs):
+        actual_level, actual_message = actual["level"], actual["message"]
+        expected_level, expected_message = expected["level"], expected["message"]
+        assert actual_level == expected_level
+        assert expected_message in actual_message
 
 
 check_scenarios = [
@@ -178,6 +205,7 @@ check_scenarios = [
     success_extensionless_scenario,
     success_multi_stream_scenario,
     success_user_provided_schema_scenario,
+    valid_single_stream_user_input_schema_scenario,
 ]
 
 
@@ -211,11 +239,15 @@ def discover(capsys, tmp_path, scenario) -> Dict[str, Any]:
         scenario.source,
         ["discover", "--config", make_file(tmp_path / "config.json", scenario.config)],
     )
-    captured = capsys.readouterr()
-    return json.loads(captured.out.splitlines()[0])["catalog"]
+    output = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    [catalog] = [o["catalog"] for o in output if o.get("catalog")]
+    return {
+            "catalog": catalog,
+            "logs": [o["log"] for o in output if o.get("log")],
+        }
 
 
-def read(capsys, tmp_path, scenario):
+def read(capsys, caplog, tmp_path, scenario):
     launch(
         scenario.source,
         [
@@ -227,6 +259,7 @@ def read(capsys, tmp_path, scenario):
         ],
     )
     captured = capsys.readouterr().out.splitlines()
+    logs = caplog.records
     return {
         "records": [
             msg
@@ -234,14 +267,14 @@ def read(capsys, tmp_path, scenario):
             if msg["type"] == "RECORD"
         ],
         "logs": [
-            msg
+            msg["log"]
             for msg in (json.loads(line) for line in captured)
             if msg["type"] == "LOG"
-        ]
+        ] + [{"level": log.levelname, "message": log.message} for log in logs]
     }
 
 
-def read_with_state(capsys, tmp_path, scenario):
+def read_with_state(capsys, caplog, tmp_path, scenario):
     launch(
         scenario.source,
         [
@@ -255,11 +288,19 @@ def read_with_state(capsys, tmp_path, scenario):
         ],
     )
     captured = capsys.readouterr()
-    return [
-        msg
-        for msg in (json.loads(line) for line in captured.out.splitlines())
-        if msg["type"] in ("RECORD", "STATE")
-    ]
+    logs = caplog.records
+    return {
+        "records": [
+            msg
+            for msg in (json.loads(line) for line in captured.out.splitlines())
+            if msg["type"] in ("RECORD", "STATE")
+        ],
+        "logs": [
+            msg["log"]
+            for msg in (json.loads(line) for line in captured.out.splitlines())
+            if msg["type"] == "LOG"
+        ] + [{"level": log.levelname, "message": log.message} for log in logs]
+    }
 
 
 def make_file(path: Path, file_contents: Union[Dict, List]) -> str:

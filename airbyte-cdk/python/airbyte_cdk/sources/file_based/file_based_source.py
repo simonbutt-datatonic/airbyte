@@ -39,6 +39,7 @@ class FileBasedSource(AbstractSource, ABC):
         self.parsers = parsers or default_parsers
         self.validation_policies = validation_policies
         self.stream_schemas = {s.stream.name: s.stream.json_schema for s in catalog.streams} if catalog else {}
+        self.logger = logging.getLogger(f"airbyte.{self.name}")
 
     def check_connection(self, logger: logging.Logger, config: Mapping[str, Any]) -> Tuple[bool, Optional[Any]]:
         """
@@ -78,10 +79,13 @@ class FileBasedSource(AbstractSource, ABC):
         """
         Return a list of this source's streams.
         """
-        try:
-            streams = []
-            for stream in config["streams"]:
+        streams = []
+        for stream in config["streams"]:
+            try:
                 stream_config = FileBasedStreamConfig(validation_policies=self.validation_policies, **stream)
+            except ValidationError as exc:
+                raise ConfigValidationError(FileBasedSourceError.CONFIG_VALIDATION_ERROR, stream=stream["name"]) from exc
+            else:
                 streams.append(
                     DefaultFileBasedStream(
                         config=stream_config,
@@ -93,7 +97,4 @@ class FileBasedSource(AbstractSource, ABC):
                         cursor=DefaultFileBasedCursor(stream_config.max_history_size, stream_config.days_to_sync_if_history_is_full),
                     )
                 )
-            return streams
-
-        except ValidationError as exc:
-            raise ConfigValidationError(FileBasedSourceError.CONFIG_VALIDATION_ERROR) from exc
+        return streams
