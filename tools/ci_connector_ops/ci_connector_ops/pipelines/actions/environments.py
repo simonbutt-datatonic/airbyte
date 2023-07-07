@@ -451,7 +451,7 @@ async def with_connector_acceptance_test(context: ConnectorContext, connector_un
         has_custom_cat_setup = False
     if has_custom_cat_setup:
         cat_command_args += ["-p", "integration_tests.acceptance"]
-    return (
+    cat_container = (
         context.dagger_client.container()
         .from_("python:3.10.12")
         .with_exec(["apt-get", "install", "curl", "bash", "tzdata"])
@@ -473,8 +473,10 @@ async def with_connector_acceptance_test(context: ConnectorContext, connector_un
         .with_env_variable("CACHEBUSTER", datetime.utcnow().strftime("%Y%m%d"))
         .with_entrypoint(["python", "-m", "pytest", "-p", "connector_acceptance_test.plugin", "--suppress-tests-failed-exit-code"])
         .with_unix_socket("/var/run/docker.sock", context.dagger_client.host().unix_socket("/var/run/docker.sock"))
-        .with_exec(cat_command_args)
     )
+    if context.is_ci:
+        cat_container = cat_container.with_env_variable("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "unix:///var/run/buildkit/buildkitd.sock")
+    return cat_container.with_exec(cat_command_args)
 
 
 def with_gradle(
