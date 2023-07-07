@@ -443,6 +443,14 @@ async def with_connector_acceptance_test(context: ConnectorContext, connector_un
     Returns:
         Container: A container with connector acceptance tests installed.
     """
+    cat_command_args = ["--acceptance-test-config", "/test_input"]
+
+    try:
+        has_custom_cat_setup = "acceptance.py" in await context.get_connector_dir().directory("integration_tests").entries()
+    except DaggerError:
+        has_custom_cat_setup = False
+    if has_custom_cat_setup:
+        cat_command_args += ["-p", "integration_tests.acceptance"]
     return (
         context.dagger_client.container()
         .from_("python:3.10.12")
@@ -465,7 +473,7 @@ async def with_connector_acceptance_test(context: ConnectorContext, connector_un
         .with_env_variable("CACHEBUSTER", datetime.utcnow().strftime("%Y%m%d"))
         .with_entrypoint(["python", "-m", "pytest", "-p", "connector_acceptance_test.plugin", "--suppress-tests-failed-exit-code"])
         .with_unix_socket("/var/run/docker.sock", context.dagger_client.host().unix_socket("/var/run/docker.sock"))
-        .with_exec(["--acceptance-test-config", "/test_input"])
+        .with_exec(cat_command_args)
     )
 
 
